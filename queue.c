@@ -27,7 +27,7 @@ void Queue_DrawF(Queue *Queue, Model *mark){
         if (Queue->items[history_index] == (QueueItem*)(NULL)) continue;
 
         DrawModel(*mark,(Vector3){Queue->items[history_index]->position.x,\
-        0.0f,\
+        0.2f,\
         Queue->items[history_index]->position.z},\
         Queue->items[history_index]->size*(QUEUE_SIZE-i)/QUEUE_SIZE,\
         Queue->items[history_index]->color);

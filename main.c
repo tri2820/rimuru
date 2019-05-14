@@ -13,8 +13,11 @@
 #define SPOUTING_SHADOW_RATIO 3
 #define MAP_X 100
 #define MAP_Y 100
-#define N_ENEMY 10
+#define N_ENEMY 12
+#define N_FOOD 34
 #define TOTAL_GAME_TIME 59
+#define MAIN_PLAYER_FOOD_INC_SIZE 0.1
+#define ENEMY_FOOD_INC_SIZE 0.073
 
 double slow_update(double old, double new, double change_rate){
     return old=new*change_rate+old*(1-change_rate);
@@ -23,15 +26,6 @@ double slow_update(double old, double new, double change_rate){
 
 double delta_time(){
     return GetTime()-(int)GetTime();
-}
-
-Camera3D camera_setup(){
-    Camera3D camera;
-    camera.up = (Vector3){ 0.0f, 0.6f, 0.0f };          
-    camera.fovy = 45.0f;                  
-    camera.type = CAMERA_PERSPECTIVE;     
-    SetCameraMode(camera, CAMERA_CUSTOM); 
-    return camera;
 }
 
 void camera_follow(Camera3D *camera, Player*p){
@@ -108,7 +102,7 @@ Vector3 draw_animate_spouting(Player *p, Model * m, double k_delta){
     Vector3 position, size, last_mark_position, last_mark_size;
 
     last_mark_position.x = p->position.x+p->direction.x*5;
-    last_mark_position.y = 0.1f;
+    last_mark_position.y = 0.3f;
     last_mark_position.z = p->position.z+p->direction.z*5;
 
     last_mark_size.x = p->size*SPOUTING_SHADOW_RATIO;
@@ -145,35 +139,20 @@ Vector3 random_flat_vector(double lim){
     return v;
 }
 
-int main()
-{
-    // Init
-    bool is_endgame_now = 0;
-    InitWindow(1000, 1000, "rimuru.io");
-    Camera3D camera = camera_setup();
-    Color groundColor = GetColor(0xF8D25AFF);
 
-    Model mark = LoadModelFromMesh(GenMeshCylinder(1, 0.01, 16));
-    Model foodcube = LoadModelFromMesh(GenMeshCube(1.0f, 1.0f, 1.0f));
-    Model player_model = LoadModelFromMesh(GenMeshSphere(2, 32, 32)); 
 
-    Player main_player;
-    main_player.color = GetColor(0x0095ffff);
-    main_player.position =  (Vector3){0.0f, 0.3f, 0.0f };
-    main_player.speed = (Vector3){0.3f, 1.0f, 0.3f};
-    main_player.size = 1.0f;
-    Player_Update_Phi(&main_player,0);
+int game_state = 1;
+Camera3D camera;
+Model mark, foodcube, player_model;
+Player main_player;
+Queue tail, foods;
+Player *enemies[N_ENEMY];
+double start_time;
 
-    Queue tail;
-    tail.next = tail.size = 0;
 
-    Queue foods;
-    foods.next = foods.size = 0;
-
-    Player *enemies[N_ENEMY];
-
+void generate_food(){
     // Generate food
-    for (int i=0; i<30; i++){
+    for (int i=0; i<N_FOOD; i++){
         double rand_x = rand()%(MAP_X/2) * (rand()%2<1?1:-1);
         double rand_z = rand()%(MAP_Y/2) * (rand()%2<1?1:-1);
         
@@ -182,7 +161,10 @@ int main()
         1
         });
     }
+}
 
+
+void generate_enemies(){
     // Generate enemies
     for (int i=0; i<N_ENEMY; i++){
         double rand_x = rand()%(MAP_X/2) * (rand()%2<1?1:-1);
@@ -198,182 +180,266 @@ int main()
 
         enemies[i] = a_player;
     }
+}
 
-    double start_time = GetTime();
-   
+
+void init(){
+    SetExitKey(KEY_Q);
+
+    InitWindow(1000, 1000, "rimuru.io");
+
+    // Camera
+    camera.up = (Vector3){ 0.0f, 0.6f, 0.0f };          
+    camera.fovy = 45.0f;                  
+    camera.type = CAMERA_PERSPECTIVE;     
+    SetCameraMode(camera, CAMERA_CUSTOM); 
+}
+
+
+void new_game(){
+    game_state=2;
+
+    // Models
+    mark = LoadModelFromMesh(GenMeshCylinder(1, 0.01, 16));
+    foodcube = LoadModelFromMesh(GenMeshCube(1.0f, 1.0f, 1.0f));
+    player_model = LoadModelFromMesh(GenMeshSphere(2, 32, 32)); 
+
+    // Main player
+    main_player.color = GetColor(0x0095ffff);
+    main_player.position =  (Vector3){0.0f, 0.3f, 0.0f };
+    main_player.speed = (Vector3){0.3f, 1.0f, 0.3f};
+    main_player.size = 1.0f;
+    Player_Update_Phi(&main_player,0);
+
+
+    // Tail of main player
+    tail.next = tail.size = 0;
+
+    // Foods
+    foods.next = foods.size = 0;
+
+    generate_food();
+    generate_enemies();
+    start_time = GetTime();
+}
+
+void game_play(){
+    
+    // Update phi of main player from controller
+    double new_phi = detect_phi(&main_player);
+    Player_Update_Phi(&main_player,new_phi);
+
+    // Update phi of enemies from greedy brain
+    double phi;
+    for (int i=0; i<N_ENEMY; i++){
+        if (enemies[i]==(Player*)(NULL)) continue;
+        phi = greedy_brain(enemies[i],&foods);
+        Player_Update_Phi(enemies[i],phi);   
+    }
+
+    // Detect main_player action
+    int is_spouting = detect_spounting();
+
+    // Handle collision between foods and main player
+    for (int i=0; i<foods.size; i++){
+        if (foods.items[i]!=(QueueItem*)(NULL)){
+            if (distance(foods.items[i]->position,main_player.position)<2*main_player.size){
+                if (!is_spouting){
+                    main_player.size+=MAIN_PLAYER_FOOD_INC_SIZE;
+                    // New food after food got destroyed
+                    foods.items[i]->position = random_flat_vector(MAP_X/2);
+                }
+            }
+        }
+    }
+
+
+    // Handle collision between foods and enemies
+    for (int i=0; i<foods.size; i++){
+        if (foods.items[i]!=(QueueItem*)(NULL)){
+
+            for (int j=0; j<N_ENEMY; j++){
+                if (enemies[j]==(Player*)(NULL)) continue;
+                if (distance(foods.items[i]->position,enemies[j]->position)<2*enemies[j]->size){
+                        enemies[j]->size+=ENEMY_FOOD_INC_SIZE;
+                        // New food after food got destroyed
+                        foods.items[i]->position = random_flat_vector(MAP_X/2);
+                        break;
+                }
+            }
+
+        }
+    }
+
+    // Start drawing
+    BeginDrawing();
+        ClearBackground(RAYWHITE);
+        BeginMode3D(camera);
+
+            // Make main player go
+            main_player.position = Player_Get_New_Position(&main_player,delta_time());
+
+            // Make enemies go
+            for (int i=0; i<N_ENEMY; i++){
+                if (enemies[i]==(Player*)(NULL)) continue;
+                enemies[i]->position = Player_Get_New_Position(enemies[i],delta_time());
+
+            }
+
+            // Draw food
+            Queue_DrawEx(&foods, &foodcube);
+
+            // Draw enemies
+            for (int i=0; i<N_ENEMY; i++){
+                if (enemies[i]==(Player*)(NULL)) continue;
+                DrawModel(player_model,enemies[i]->position, enemies[i]->size, enemies[i]->color);
+            }
+
+            // Handle main player actions
+            double k_delta;
+            Vector3 last_mark_position, last_mark_size;
+            if (!is_spouting){
+                // Draw main player
+                DrawModel(player_model,main_player.position, main_player.size, main_player.color);
+                Queue_Add(&tail, (QueueItem){main_player.position, GetColor(0x4adcf9ff),main_player.size});
+                k_delta=0;            
+            } else {
+                k_delta=MIN(k_delta+0.1,1);
+
+                // Draw main player's spouting shadow
+                Vector3 last_mark_position = draw_animate_spouting(&main_player, &mark, k_delta);
+
+                // Handle main player eat enemies
+                for (int i=0; i<N_ENEMY; i++){
+                    if (enemies[i]==(Player*)(NULL)) continue;
+                    if (distance(enemies[i]->position,last_mark_position)+enemies[i]->size<main_player.size*SPOUTING_SHADOW_RATIO/2.0f){
+                            main_player.size+=enemies[i]->size*0.3;
+                            enemies[i] = (Player*)(NULL);
+                    }
+                }
+            }
+
+            // Draw tail of main player
+            Queue_DrawF(&tail,&mark);
+            DrawPlane((Vector3){ 0.0f, 0.0f, 0.0f }, (Vector2){ MAP_X, MAP_Y }, GetColor(0xF8D25AFF));
+            DrawGrid(100, 10.0f);
+
+        EndMode3D();
+
+        // Check leaderboard
+        int n_better=N_ENEMY+1, n_enemy=N_ENEMY+1;
+        for (int i=0; i<N_ENEMY; i++){
+            if (enemies[i]==(Player*)(NULL)) {
+                n_enemy--;
+                n_better--;
+                continue;
+            }
+            if (enemies[i]->size < main_player.size) n_better--;
+        }
+
+        // Drawing info banner
+        char str[5];
+        sprintf(str, "%d/%d", n_better, n_enemy);
+
+        DrawRectangle( 10, 10, 550, 220, Fade(SKYBLUE, 0.5f));
+        DrawRectangleLines( 10, 10, 550, 220, BLUE);
+        
+        DrawText("#leaderboard", 30, 140, 30, BLACK);
+        DrawText(str, 70, 80, 60, BLACK);
+
+        DrawText("Time until end", 300, 40, 30, BLACK);
+        int game_remaining_time = (int)(TOTAL_GAME_TIME-GetTime()+start_time);
+        sprintf(str,"%d:%d\n",(game_remaining_time/60),(game_remaining_time%60));
+        DrawText(str, 260, 70, 140, BLACK);
+
+        // Check timer
+        if (game_remaining_time==0){
+            game_state = 0;
+        }
+
+    EndDrawing();
+
+    // Limiting main player's position
+    if (main_player.position.x>MAP_X/2) main_player.position.x=MAP_X/2;
+    if (main_player.position.x<-MAP_X/2) main_player.position.x=-MAP_X/2;
+    if (main_player.position.z>MAP_Y/2) main_player.position.z=MAP_Y/2;
+    if (main_player.position.z<-MAP_Y/2) main_player.position.z=-MAP_Y/2;
+}
+
+
+void game_intro(){
+    // Draw start game banner
+    BeginDrawing();
+        ClearBackground(RAYWHITE);
+        DrawRectangle( 50, 350, 900, 400, Fade(PINK, 0.5f));
+        DrawRectangleLines( 50, 350, 900, 400, RED);
+        DrawText("Rimuru! - Slime in action", 80, 400, 70, BLACK);
+        DrawText("Z to eat other players", 120, 490, 50, BLACK);
+        DrawText("Arrow keys to move", 120, 570, 50, BLACK);
+        DrawText("Q to quit", 120, 650, 50, BLACK);
+    EndDrawing();
+
+    if (IsKeyPressed(ACTION_KEY)) new_game();
+}
+
+
+void game_end(){
+    // Draw endgame info banner
+    BeginDrawing();
+        char str[250];
+        
+        DrawRectangle( 50, 350, 900, 400, Fade(PINK, 0.5f));
+        DrawRectangleLines( 50, 350, 900, 400, RED);
+
+        sprintf(str, "You scored %f", main_player.size);
+        DrawText("Congratulations!", 80, 400, 100, BLACK);
+        DrawText(str, 80, 520, 50, BLACK);
+        char * ranks[] = {"AMATEUR","NEW KID ON THE BLOCK","NAIVE FRESHMAN","AVERAGE HUMAN","EXPERT","LEGENDARY ONE"};
+        
+        char * player_rank = ranks[0];
+        if (main_player.size>25){
+            player_rank = ranks[5];
+        } else if (main_player.size>20){
+            player_rank = ranks[4];
+        } else if (main_player.size>15){
+            player_rank = ranks[3];
+        } else if (main_player.size>10){
+            player_rank = ranks[2];
+        } else if (main_player.size>5){
+            player_rank = ranks[1];
+        } 
+
+        sprintf(str, "Rank: %s", player_rank);
+        DrawText(str, 80, 600, 40, BLACK);
+        DrawText("R to restart", 720, 650, 28, BLACK);
+        DrawText("Q to quit", 720, 690, 28, BLACK);
+    EndDrawing();
+
+    if (IsKeyDown(KEY_R)) new_game();
+}
+
+
+
+int main()
+{
+    // Init
+    init();
+
     SetTargetFPS(60);               
     while (!WindowShouldClose())
     {   
-        // Camera stuff
         camera_follow(&camera,&main_player);  
         UpdateCamera(&camera);         
 
-        if (!is_endgame_now){
-            // Update phi of main player from controller
-            double new_phi = detect_phi(&main_player);
-            Player_Update_Phi(&main_player,new_phi);
-
-            // Update phi of enemies from greedy brain
-            double phi;
-            for (int i=0; i<N_ENEMY; i++){
-                if (enemies[i]==(Player*)(NULL)) continue;
-                phi = greedy_brain(enemies[i],&foods);
-                Player_Update_Phi(enemies[i],phi);   
-            }
-
-            // Detect main_player action
-            int is_spouting = detect_spounting();
-
-            // Handle collision between foods and main player
-            for (int i=0; i<foods.size; i++){
-                if (foods.items[i]!=(QueueItem*)(NULL)){
-                    if (distance(foods.items[i]->position,main_player.position)<2*main_player.size){
-                        if (!is_spouting){
-                            main_player.size+=0.1;
-                            // New food after food got destroyed
-                            foods.items[i]->position = random_flat_vector(MAP_X/2);
-                        }
-                    }
-                }
-            }
-
-
-            // Handle collision between foods and enemies
-            for (int i=0; i<foods.size; i++){
-                if (foods.items[i]!=(QueueItem*)(NULL)){
-
-                    for (int j=0; j<N_ENEMY; j++){
-                        if (enemies[j]==(Player*)(NULL)) continue;
-                        if (distance(foods.items[i]->position,enemies[j]->position)<2*enemies[j]->size){
-                                enemies[j]->size+=0.06;
-                                // New food after food got destroyed
-                                foods.items[i]->position = random_flat_vector(MAP_X/2);
-                                break;
-                        }
-                    }
-
-                }
-            }
-
-            // Start drawing
-            BeginDrawing();
-                ClearBackground(RAYWHITE);
-                BeginMode3D(camera);
-                    // Make main player go
-                    main_player.position = Player_Get_New_Position(&main_player,delta_time());
-
-                    // Make enemies go
-                    for (int i=0; i<N_ENEMY; i++){
-                        if (enemies[i]==(Player*)(NULL)) continue;
-                        enemies[i]->position = Player_Get_New_Position(enemies[i],delta_time());
-
-                    }
-
-                    // Draw food
-                    Queue_DrawEx(&foods, &foodcube);
-
-                    // Draw enemies
-                    for (int i=0; i<N_ENEMY; i++){
-                        if (enemies[i]==(Player*)(NULL)) continue;
-                        DrawModel(player_model,enemies[i]->position, enemies[i]->size, enemies[i]->color);
-                    }
-
-                    // Handle main player actions
-                    // Draw main player
-                    double k_delta;
-                    Vector3 last_mark_position, last_mark_size;
-                    if (!is_spouting){
-                        DrawModel(player_model,main_player.position, main_player.size, main_player.color);
-                        Queue_Add(&tail, (QueueItem){main_player.position, GetColor(0x4adcf9ff),main_player.size});
-                        k_delta=0;            
-                    } else {
-                        k_delta=MIN(k_delta+0.1,1);
-                        Vector3 last_mark_position = draw_animate_spouting(&main_player, &mark, k_delta);
-
-                        // Handle main player eat enemies
-                        for (int i=0; i<N_ENEMY; i++){
-                            if (enemies[i]==(Player*)(NULL)) continue;
-                            if (distance(enemies[i]->position,last_mark_position)+enemies[i]->size<main_player.size*SPOUTING_SHADOW_RATIO/2.0f){
-                                    main_player.size+=enemies[i]->size*0.3;
-                                    enemies[i] = (Player*)(NULL);
-                            }
-                        }
-                    }
-
-                    // Draw tail of main player
-                    Queue_DrawF(&tail,&mark);
-                    DrawPlane((Vector3){ 0.0f, 0.0f, 0.0f }, (Vector2){ MAP_X, MAP_Y }, groundColor);
-                    DrawGrid(100, 1.0f);
-
-                EndMode3D();
-
-                int n_better=N_ENEMY+1, n_enemy=N_ENEMY+1;
-                for (int i=0; i<N_ENEMY; i++){
-                    if (enemies[i]==(Player*)(NULL)) {
-                        n_enemy--;
-                        n_better--;
-                        continue;
-                    }
-                    if (enemies[i]->size < main_player.size) n_better--;
-                }
-
-                char str[5];
-                sprintf(str, "%d/%d", n_better, n_enemy);
-
-                DrawRectangle( 10, 10, 550, 220, Fade(SKYBLUE, 0.5f));
-                DrawRectangleLines( 10, 10, 550, 220, BLUE);
-                
-                DrawText("#leaderboard", 30, 140, 30, BLACK);
-                DrawText(str, 70, 80, 60, BLACK);
-
-                DrawText("Time until end", 300, 40, 30, BLACK);
-                int game_remaining_time = (int)(TOTAL_GAME_TIME-GetTime()+start_time);
-                sprintf(str,"%d:%d\n",(game_remaining_time/60),(game_remaining_time%60));
-                DrawText(str, 260, 70, 140, BLACK);
-
-                if (game_remaining_time==0){
-                    is_endgame_now = 1;
-                }
-
-            EndDrawing();
-
-            if (main_player.position.x>MAP_X/2) main_player.position.x=MAP_X/2;
-            if (main_player.position.x<-MAP_X/2) main_player.position.x=-MAP_X/2;
-            if (main_player.position.z>MAP_Y/2) main_player.position.z=MAP_Y/2;
-            if (main_player.position.z<-MAP_Y/2) main_player.position.z=-MAP_Y/2;
-
-
-        } else {
-            // is end game
-            BeginDrawing();
-            char str[250];
-
-            DrawRectangle( 50, 350, 900, 300, Fade(PINK, 0.5f));
-            DrawRectangleLines( 50, 350, 900, 300, RED);
-
-            sprintf(str, "You scored %f", main_player.size);
-            DrawText("Congratulations!", 80, 400, 100, BLACK);
-            DrawText(str, 80, 520, 50, BLACK);
-            char * ranks[] = {"NOOB","BEGINNER","SO-SO","BETTER THAN MOST PEOPLE","MASTER","WIZARD"};
-            
-            char * player_rank = ranks[0];
-            if (main_player.size>20){
-                player_rank = ranks[5];
-            } else if (main_player.size>17){
-                player_rank = ranks[4];
-            } else if (main_player.size>10){
-                player_rank = ranks[3];
-            } else if (main_player.size>8){
-                player_rank = ranks[2];
-            } else if (main_player.size>5){
-                player_rank = ranks[1];
-            } 
-
-            sprintf(str, "Rank: %s", player_rank);
-            DrawText(str, 80, 600, 30, BLACK);
-
-            EndDrawing();
+        // Game running on playing mode
+        if (game_state==2){
+            game_play();
+        } else if (game_state==1){
+            game_intro();
+        } else if (game_state==0){
+            game_end();
         }
+
     }
 
 

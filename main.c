@@ -70,6 +70,7 @@ int detect_spounting(){
     if (IsKeyDown(ACTION_KEY)){
         return 1;
     }   
+
     return 0;
 }
 
@@ -103,7 +104,7 @@ double greedy_brain(Player *p, Queue * foods){
     return _angle;
 }
 
-Vector3 draw_animate_spouting(Player *p, Model * m, double k_delta){
+Vector3 draw_animate_spouting(Player *p, Model * m, double spouting_delta){
     Vector3 position, size, last_mark_position, last_mark_size;
 
     last_mark_position.x = p->position.x+p->direction.x*5;
@@ -113,17 +114,19 @@ Vector3 draw_animate_spouting(Player *p, Model * m, double k_delta){
     last_mark_size.x = p->size*SPOUTING_SHADOW_RATIO;
     last_mark_size.y = p->size;
     last_mark_size.z = p->size*SPOUTING_SHADOW_RATIO;
+
     
     for (double i=0; i<=1; i+=0.1){
-        if (i<(1-k_delta+0.1)){
-            size.x = last_mark_size.x*1/(1+pow(2.7,-((1-i)-0.5)*4))*pow(k_delta,0.8) + p->size*1/(1+pow(2.7,-(i-0.5)*4))*pow(1-k_delta,0.8);
-            size.y = last_mark_size.y*1/(1+pow(2.7,-((1-i)-0.5)*4))*pow(k_delta,0.8) + p->size*1/(1+pow(2.7,-(i-0.5)*4))*pow(1-k_delta,0.8);
-            size.z = last_mark_size.z*1/(1+pow(2.7,-((1-i)-0.5)*4))*pow(k_delta,0.8) + p->size*1/(1+pow(2.7,-(i-0.5)*4))*pow(1-k_delta,0.8);
+        if (i<(1-spouting_delta+0.1)){
+            size.x = last_mark_size.x*1/(1+pow(2.7,-((1-i)-0.5)*4))*pow(spouting_delta,0.8) + p->size*1/(1+pow(2.7,-(i-0.5)*4))*pow(1-spouting_delta,0.8);
+            size.y = last_mark_size.y*1/(1+pow(2.7,-((1-i)-0.5)*4))*pow(spouting_delta,0.8) + p->size*1/(1+pow(2.7,-(i-0.5)*4))*pow(1-spouting_delta,0.8);
+            size.z = last_mark_size.z*1/(1+pow(2.7,-((1-i)-0.5)*4))*pow(spouting_delta,0.8) + p->size*1/(1+pow(2.7,-(i-0.5)*4))*pow(1-spouting_delta,0.8);
         } else {
             size.x = 0;
             size.y = 0;
             size.z = 0;
         }
+
 
         position.x = last_mark_position.x*(1-i)+p->position.x*i;
         position.y = last_mark_position.y;
@@ -153,7 +156,7 @@ Player main_player;
 Queue tail, foods;
 Player *enemies[N_ENEMY];
 double start_time;
-
+double spouting_delta;
 
 void generate_food(){
     // Generate food
@@ -300,18 +303,18 @@ void game_play(){
             }
 
             // Handle main player actions
-            double k_delta;
+            
             Vector3 last_mark_position, last_mark_size;
             if (!is_spouting){
                 // Draw main player
                 DrawModel(player_model,main_player.position, main_player.size, main_player.color);
                 Queue_Add(&tail, (QueueItem){main_player.position, GetColor(0x4adcf9ff),main_player.size});
-                k_delta=0;            
+                spouting_delta=0;            
             } else {
-                k_delta=MIN(k_delta+0.1,1);
+                spouting_delta=MIN(spouting_delta+0.1,1);
 
                 // Draw main player's spouting shadow
-                Vector3 last_mark_position = draw_animate_spouting(&main_player, &mark, k_delta);
+                Vector3 last_mark_position = draw_animate_spouting(&main_player, &mark, spouting_delta);
 
                 // Handle main player eat enemies
                 for (int i=0; i<N_ENEMY; i++){

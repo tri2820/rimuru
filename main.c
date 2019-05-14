@@ -6,6 +6,10 @@
 #include "player.h"
 #include "queue.h"
 
+#if defined(PLATFORM_WEB)
+    #include <emscripten/emscripten.h>
+#endif
+
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #define ROTATE_UPDATE_SPEED 0.05
@@ -18,6 +22,7 @@
 #define TOTAL_GAME_TIME 59
 #define MAIN_PLAYER_FOOD_INC_SIZE 0.1
 #define ENEMY_FOOD_INC_SIZE 0.073
+
 
 double slow_update(double old, double new, double change_rate){
     return old=new*change_rate+old*(1-change_rate);
@@ -224,7 +229,6 @@ void new_game(){
 }
 
 void game_play(){
-    
     // Update phi of main player from controller
     double new_phi = detect_phi(&main_player);
     Player_Update_Phi(&main_player,new_phi);
@@ -368,7 +372,11 @@ void game_play(){
 
 
 void game_intro(){
-    // Draw start game banner
+    // LIBRAY ISSUE?: cannot detect key on the web if put after drawing
+    if (IsKeyPressed(ACTION_KEY)) {
+        new_game();
+    }
+
     BeginDrawing();
         ClearBackground(RAYWHITE);
         DrawRectangle( 50, 350, 900, 400, Fade(PINK, 0.5f));
@@ -378,12 +386,12 @@ void game_intro(){
         DrawText("Arrow keys to move", 120, 570, 50, BLACK);
         DrawText("Q to quit", 120, 650, 50, BLACK);
     EndDrawing();
-
-    if (IsKeyPressed(ACTION_KEY)) new_game();
 }
 
 
 void game_end(){
+    if (IsKeyDown(KEY_R)) new_game();
+
     // Draw endgame info banner
     BeginDrawing();
         char str[250];
@@ -414,34 +422,37 @@ void game_end(){
         DrawText("R to restart", 720, 650, 28, BLACK);
         DrawText("Q to quit", 720, 690, 28, BLACK);
     EndDrawing();
-
-    if (IsKeyDown(KEY_R)) new_game();
 }
 
+void update_frame(){
 
+    // Game running on playing mode
+    if (game_state==2){
+        camera_follow(&camera,&main_player);  
+        UpdateCamera(&camera);         
+        game_play();
+    } else if (game_state==1){
+        game_intro();
+    } else if (game_state==0){
+        game_end();
+    }
+}
 
 int main()
 {
-    // Init
+
     init();
 
-    SetTargetFPS(60);               
-    while (!WindowShouldClose())
-    {   
-        camera_follow(&camera,&main_player);  
-        UpdateCamera(&camera);         
-
-        // Game running on playing mode
-        if (game_state==2){
-            game_play();
-        } else if (game_state==1){
-            game_intro();
-        } else if (game_state==0){
-            game_end();
+    #if defined(PLATFORM_WEB)
+        emscripten_set_main_loop(update_frame, 0, 1);
+    #else
+        SetTargetFPS(60);               
+        while (!WindowShouldClose())
+        {   
+            update_frame();
         }
 
-    }
-
+    #endif
 
     CloseWindow();      
     return 0;

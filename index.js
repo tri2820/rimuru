@@ -1548,7 +1548,7 @@ function isDataURI(filename) {
 
 
 
-var wasmBinaryFile = 'rimuru.wasm';
+var wasmBinaryFile = 'index.wasm';
 if (!isDataURI(wasmBinaryFile)) {
   wasmBinaryFile = locateFile(wasmBinaryFile);
 }

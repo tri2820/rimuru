@@ -18,7 +18,7 @@ run_web:
 	emrun rimuru.html
 
 clean:
-	rm -rf rimuru* || true
+	rm -rf rimuru || true
 
 update_homepage: web
 	cp rimuru.html index.html
